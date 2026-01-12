@@ -33,11 +33,11 @@ jobs:
     steps:
       - name: Deploy to EC2
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          echo "${{ secrets.AWS_KEY }}" > key.pem
           chmod 600 key.pem
 
           ssh -o StrictHostKeyChecking=no -i key.pem \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
             set -e
 
             echo "🔹 Ensure Docker network exists"
