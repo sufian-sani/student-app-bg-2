@@ -17,7 +17,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | \
+          docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
       - name: Build and Push Image
         run: |
@@ -31,25 +33,27 @@ jobs:
     steps:
       - name: Deploy to EC2
         run: |
-          echo "${{ secrets.AWS_KEY }}" > key.pem
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
           chmod 600 key.pem
 
           ssh -o StrictHostKeyChecking=no -i key.pem \
-          ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
-
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
 
-            echo "🔹 Logging into Docker Hub"
+            echo "🔹 Ensure Docker network exists"
+            docker network create my_network || true
+
+            echo "🔹 Login to Docker Hub"
             docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
 
-            echo "🔹 Pulling latest image"
+            echo "🔹 Pull latest image"
             docker pull ${{ secrets.DOCKER_USERNAME }}/student-app:latest
 
-            echo "🔹 Stopping old app container"
+            echo "🔹 Stop old container"
             docker stop student-app || true
             docker rm student-app || true
 
-            echo "🔹 Starting new app container"
+            echo "🔹 Run new container"
             docker run -d \
               --name student-app \
               --network my_network \
@@ -61,6 +65,5 @@ jobs:
               --restart always \
               ${{ secrets.DOCKER_USERNAME }}/student-app:latest
 
-            echo "✅ Deployment complete"
-
+            echo "✅ Deployment successful"
           EOF
