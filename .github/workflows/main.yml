@@ -1,4 +1,4 @@
-name: CI/CD - Student App
+name: Deploy Student App (Blue-Green)
 
 on:
   push:
@@ -6,29 +6,27 @@ on:
       - main
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login Docker Hub
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | \
           docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Build and Push Image
+      - name: Build & Push Docker Image
         run: |
           docker build -t ${{ secrets.DOCKER_USERNAME }}/student-app:latest .
           docker push ${{ secrets.DOCKER_USERNAME }}/student-app:latest
 
   deploy:
+    needs: build
     runs-on: ubuntu-latest
-    needs: build-and-push
 
     steps:
       - name: Deploy to EC2
@@ -38,32 +36,55 @@ jobs:
 
           ssh -o StrictHostKeyChecking=no -i key.pem \
           ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
-            set -e
+          
+          set -e
 
-            echo "🔹 Ensure Docker network exists"
-            docker network create my_network || true
+          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+          docker pull ${{ secrets.DOCKER_USERNAME }}/student-app:latest
 
-            echo "🔹 Login to Docker Hub"
-            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+          # Determine active container
+          if docker ps | grep student-app-blue; then
+              ACTIVE=blue
+              ACTIVE_PORT=5001
+              IDLE=green
+              IDLE_PORT=5002
+          elif docker ps | grep student-app-green; then
+              ACTIVE=green
+              ACTIVE_PORT=5002
+              IDLE=blue
+              IDLE_PORT=5001
+          else
+              # First deploy
+              ACTIVE=none
+              ACTIVE_PORT=0
+              IDLE=blue
+              IDLE_PORT=5001
+          fi
 
-            echo "🔹 Pull latest image"
-            docker pull ${{ secrets.DOCKER_USERNAME }}/student-app:latest
+          echo "Deploying $IDLE container"
 
-            echo "🔹 Stop old container"
-            docker stop student-app || true
-            docker rm student-app || true
+          # Run new container
+          docker rm -f student-app-$IDLE || true
+          docker run -d \
+            --name student-app-$IDLE \
+            --network my_network \
+            -p $IDLE_PORT:5000 \
+            -e DB_HOST=mysql-db \
+            -e DB_USER=root \
+            -e DB_PASSWORD=root \
+            -e DB_NAME=attendance_db \
+            --restart always \
+            ${{ secrets.DOCKER_USERNAME }}/student-app:latest
 
-            echo "🔹 Run new container"
-            docker run -d \
-              --name student-app \
-              --network my_network \
-              -p 5000:5000 \
-              -e DB_HOST=db \
-              -e DB_USER=root \
-              -e DB_PASSWORD=root \
-              -e DB_NAME=attendance_db \
-              --restart always \
-              ${{ secrets.DOCKER_USERNAME }}/student-app:latest
+          # Switch Nginx only if not first deploy
+          if [ "$ACTIVE" != "none" ]; then
+              sudo sed -i "s/127.0.0.1:$ACTIVE_PORT/127.0.0.1:$IDLE_PORT/" /etc/nginx/conf.d/student-app.conf
+              sudo nginx -t
+              sudo systemctl reload nginx
 
-            echo "✅ Deployment successful"
+              # Stop old container
+              docker rm -f student-app-$ACTIVE || true
+          fi
+
+          echo "✅ Deployment complete"
           EOF
