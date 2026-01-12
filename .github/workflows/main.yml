@@ -49,23 +49,6 @@ jobs:
             echo "🔹 Pull latest image"
             docker pull ${{ secrets.DOCKER_USERNAME }}/student-app:latest
 
-            # -------------------------------
-            # 🔹 Run database migrations first
-            # -------------------------------
-            echo "🔹 Running DB migrations (add 'active' column if missing)"
-            docker run --rm \
-              --network my_network \
-              -e DB_HOST=db \
-              -e DB_USER=root \
-              -e DB_PASSWORD=root \
-              -e DB_NAME=attendance_db \
-              ***/student-app:latest \
-              python run.py --init-db
-
-            # -------------------------------
-            # 🔹 Replace running app container
-            # -------------------------------
-
             echo "🔹 Stop old container"
             docker stop student-app || true
             docker rm student-app || true
