@@ -28,6 +28,20 @@ def init_db():
         name VARCHAR(100) NOT NULL
     )
     """)
+    
+    cursor.execute("""
+        SELECT COUNT(*) 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = 'attendance_db' 
+        AND TABLE_NAME = 'students' 
+        AND COLUMN_NAME = 'active'
+    """)
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            ALTER TABLE students
+            ADD COLUMN active TINYINT(1) DEFAULT 1
+        """)
+
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS attendance (
